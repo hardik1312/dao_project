@@ -4,20 +4,31 @@ pragma solidity ^0.8.6;
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-contract DAO is ReentrancyGuard, AccessControl{
-    bytes32 private immutable CONTRIBUTOR_ROLE = keccak256("CONTRIBUTOR");
-    bytes32 private immutable STAKEHOLDER_ROLE = keccak256("STAKEHOLDER");
+contract DAO is ReentrancyGuard,AccessControl{
+    bytes32 private immutable CONTRIBUTOR_ROLE=keccak256("CONTRIBUTOR");
+    bytes32 private immutable STAKEHOLDER_ROLE=keccak256("STAKEHOLDER");
 
-    uint256 immutable MIN_STAKEHOLDER_CONTRIBUTION = 1 ether;
-    uint32 immutable MIN_VOTE_DURATION = 3 minutes;
+    uint256 immutable MIN_STAKEHOLDER_CONTRIBUTION=1 ether;
+    uint32 immutable MIN_VOTE_DURATION= 3 minutes;
 
-    uint32 totalProposals;
-    uint256 public daoBalance;
+    uint32 totalProposals; //int keeps track of total no of prop in the dao
+    uint256 public daoBalance; //total balance in the dao
 
+    //all the raised prop are stored in thsi mapping
+    //point to a particular prop by its prop id
     mapping(uint256 => ProposalStruct) private raisedProposals;
-    mapping(address => uint256[]) private stakeholderVotes;
-    mapping(uint256 => VotedStruct[]) private votedOn;
+    
+    //mapping of votes given by individual stakeholder to diff props
+
+    mapping(address=> uint256[]) private stakeholderVotes;
+   
+   //contains all the voting info abt a particular prop
+   //referenced by prop id
+    mapping(uint256=> VotedStruct[]) private votedOn;
+
+    //total contribution for each contributor
     mapping(address => uint256) private contributors;
+    //total contribution for each stakeholder
     mapping(address => uint256) private stakeholders;
 
     struct ProposalStruct{
@@ -35,27 +46,29 @@ contract DAO is ReentrancyGuard, AccessControl{
         address executor;
     }
 
+    //holds info abt an individual voter
     struct VotedStruct{
         address voter;
         uint256 timestamp;
         bool chosen;
     }
 
+    //universal event for every action 
     event Action(
         address indexed initiator,
         bytes32 role,
         string message,
         address indexed beneficiary,
-        uint256 amount
+        uint256 amount 
     );
 
     modifier stakeholderOnly(string memory message){
-        require(hasRole(STAKEHOLDER_ROLE, msg.sender),message);
+        require(hasRole(STAKEHOLDER_ROLE,msg.sender),message);
         _;
     }
 
-    modifier contributorOnly(string memory message) {
-        require(hasRole(CONTRIBUTOR_ROLE, msg.sender),message);
+    modifier contributorOnly(string memory message){
+        require(hasRole(CONTRIBUTOR_ROLE,msg.sender),message);
         _;
     }
 
@@ -64,61 +77,89 @@ contract DAO is ReentrancyGuard, AccessControl{
         string memory description,
         address beneficiary,
         uint amount
-        ) external stakeholderOnly("proposal creation allowed for the stakeholders only")
-        {
-            uint32 proposalId = totalProposals++;
-            ProposalStruct storage proposal = raisedProposals[proposalId];
-            
-            proposal.id = proposalId;
-            proposal.proposer = payable(msg.sender);
-            proposal.title = title;
-            proposal.description = description;
-            proposal.beneficiary =payable(beneficiary);
-            proposal.amount = amount;
-            proposal.duration = block.timestamp + MIN_VOTE_DURATION;
+    ) external stakeholderOnly("proposal creation allowed for the stakeholders only")
+    {
+        uint32 proposalId=totalProposals++;
+        ProposalStruct storage proposal=raisedProposals[proposalId];
 
-            emit Action(
-                msg.sender,
-                STAKEHOLDER_ROLE,
-                "PROPOSAL RAISED",
-                beneficiary,
-                amount
-            );
-        }
+        proposal.id=proposalId;
+        proposal.proposer=payable(msg.sender);
+        proposal.title=title;
+        proposal.description=description;
+        proposal.beneficiary=payable(beneficiary);
+        proposal.amount=amount;
+        proposal.duration=block.timestamp+MIN_VOTE_DURATION;
 
-    function handleVoting(ProposalStruct storage proposal) private {
+        emit Action(
+            msg.sender,
+            STAKEHOLDER_ROLE,
+            "PROPOSAL RAISED",
+            beneficiary,
+            amount
+        );
+    }
+
+
+    //all these checks are handled before the actual voting by a proposer
+    function handleVoting(ProposalStruct storage proposal) internal{
+        //first thing is to check if this prop passed already
+        //or if the duration is active or still open
+        //then next thing is to say this this proposal has been passed
+        //by updating the boolean 
+        //this checks if the proposal has been passed
+        //or the voting time has been elapsed
         if(
             proposal.passed ||
-            proposal.duration <= block.timestamp
-        ) {
-            proposal.passed = true;
+            proposal.duration<=block.timestamp
+        ){
+            proposal.passed=true;
             revert("proposal duration expired");
         }
 
-        uint256[] memory tempVotes = stakeholderVotes[msg.sender];
-        for(uint256 votes = 0; votes < tempVotes.length; votes++){
+        //a list of all the votes given by a proposer 
+        //for diff proposasls
+        uint256[] memory tempVotes=stakeholderVotes[msg.sender];
+        //check if a proposer has already voted on the proposal 
+        //by using prop id for reference
+        //if double voting found for this particular prop then revert
+        for(uint256 votes=0;votes<tempVotes.length;votes++){
             if(proposal.id==tempVotes[votes]){
-                revert("Double voting not allowed.");
+                revert("Double voting not allowed");
             }
         }
     }
 
-    function Vote(uint256 proposalId, bool chosen) external stakeholderOnly("Unauthorized access: Only stakeholders are permitted.")
-    returns(VotedStruct memory) {
-        ProposalStruct storage proposal = raisedProposals[proposalId];
+
+    //voting is based on the votedstruct struct for individual voters
+    function Vote(uint256 proposalId,bool chosen) public stakeholderOnly("Unauthorized access: Stakeholders only permitted")
+    returns (VotedStruct memory){
+
+        //create a new prop object in the storage
+        ProposalStruct storage proposal=raisedProposals[proposalId];
+        //perform the voting procedure
         handleVoting(proposal);
 
+        //if this particular voter as voted for particular prop,
+        //increment the upvotes for this particular proposal by 1
+        //otherwise downvote is incremented by 1
         if(chosen) proposal.upvotes++;
         else proposal.downvotes++;
 
+
+        //push the individual stakeholder(msg.sender) vote for this corresponding proposal
+        //referenced by the proposal id 
         stakeholderVotes[msg.sender].push(proposal.id);
 
+        //push this particular prop id in the Voted on mapping
+        //push this voter as one of the entities that has voted
+        //for this particular proposal referenced by prop id
+        //contains all the details for all the voters for a particular prop id
         votedOn[proposal.id].push(
-        VotedStruct(    
-            msg.sender,
-            block.timestamp,
-            chosen
-        )
+            VotedStruct(
+                msg.sender,
+                block.timestamp,
+                chosen
+            )
         );
         emit Action(
             msg.sender,
@@ -134,21 +175,36 @@ contract DAO is ReentrancyGuard, AccessControl{
         );
     }
 
-    function payTo(
-        address to,
-        uint256 amount
-    ) internal returns(bool){
-        (bool success,) = payable(to).call{value:amount}("");
-        require(success,"Payment failed, something went wrong");
+    //pay a particular amt to a particular address
+    //its an internal function which means it cant be seen by others
+    function payTo(address to, uint256 amount) internal returns (bool) {
+        
+        (bool success,) = payable(to).call{value: amount}("");
+        require(success, "Payment failed");
         return true;
     }
 
-    function payBeneficiary(uint proposalId) public stakeholderOnly("Unauthorized: Stakeholders Only") nonReentrant returns(uint) {
-        ProposalStruct storage proposal = raisedProposals[proposalId];
-        require(daoBalance>=proposal.amount, "Insufficient funds");
 
-        if(proposal.paid) revert("Payment is already sent.");
-        if(proposal.upvotes <= proposal.downvotes) revert("Insufficient votes.");
+
+    //function responsible for DAO fund management to recepient
+    //also check whether this function is called by a malicious attacker or not
+    //since it has direct access to DAO balance
+    function payBeneficiary(uint256 proposalId)
+        public
+        stakeholderOnly("Unauthorized: Stakeholders only")
+        nonReentrant()
+        returns (uint256)
+    {
+        //retrieve the proposal from storage by referencing its id
+        //and place it here in the function by creating the storage object here
+        ProposalStruct storage proposal = raisedProposals[proposalId];
+        require(daoBalance >= proposal.amount, "Insufficient fund");
+
+        if (proposal.paid) revert("Payment sent before");
+
+        if (proposal.upvotes <= proposal.downvotes)
+            revert("Insufficient votes");
+
 
         proposal.paid = true;
         proposal.executor = msg.sender;
@@ -159,63 +215,123 @@ contract DAO is ReentrancyGuard, AccessControl{
         emit Action(
             msg.sender,
             STAKEHOLDER_ROLE,
-            "PAYMENT TRANSFERRED",
+            "PAYMENT TRANSFERED",
             proposal.beneficiary,
             proposal.amount
         );
+
         return daoBalance;
     }
 
-    function contribute() public payable{
-        require(msg.value>0, "Contribution should be greater than zero");
-        if(!hasRole(STAKEHOLDER_ROLE,msg.sender)){
-            uint256 totalContribution = contributors[msg.sender] + msg.value;
 
-            if(totalContribution>=MIN_STAKEHOLDER_CONTRIBUTION){
-                stakeholders[msg.sender]=totalContribution;
-                _grantRole(STAKEHOLDER_ROLE,msg.sender);
+    //receive money from people from dao 
+    //document in our dao that this person has contributed to the dao
+    function contribute() payable public {
+        require(msg.value > 0 ether, "Contributing zero is not allowed.");
+        if (!hasRole(STAKEHOLDER_ROLE, msg.sender)) {
+
+            //grab the total contributions by this contributor
+            //see how much he as already contributed to this platform
+            //contributors[msg.sender] returns total contribution by a contributor
+            uint256 totalContribution =
+                contributors[msg.sender] + msg.value;//add total contri with current amt
+
+            if (totalContribution >= MIN_STAKEHOLDER_CONTRIBUTION) {
+                //assign the total contribution to this stakeholders account
+                stakeholders[msg.sender] = totalContribution;
+                //_grantRole comes from AccessControl.sol
+                //if total contribution > 1 eth, person is both stakeholder and contributor
+                //otherwise he's just contributor
+                _grantRole(STAKEHOLDER_ROLE, msg.sender);
+             
             }
+             //add only amt for contributor
+                contributors[msg.sender] += msg.value;
+                _grantRole(CONTRIBUTOR_ROLE,msg.sender);
+        } else {
             contributors[msg.sender] += msg.value;
-            _grantRole(CONTRIBUTOR_ROLE,msg.sender);
+            stakeholders[msg.sender] += msg.value;
         }
-        else{
-            contributors[msg.sender]+=msg.value;
-            stakeholders[msg.sender]+=msg.value;
-        }
-
-        daoBalance+=msg.value;
+        //increment dao balance by this new contribution
+        daoBalance += msg.value;
 
         emit Action(
             msg.sender,
-            CONTRIBUTOR_ROLE,
+            STAKEHOLDER_ROLE,
             "CONTRIBUTION RECEIVED",
             address(this),
             msg.value
-        );
+        );   
     }
 
-    function getProposals() external view returns(ProposalStruct[] memory props) {
+    function getProposals()
+        public
+        view
+        returns (ProposalStruct[] memory props)
+    {
         props = new ProposalStruct[](totalProposals);
-        for(uint256 i=0; i<totalProposals;i++){
+
+        for (uint256 i = 0; i < totalProposals; i++) {
             props[i] = raisedProposals[i];
         }
     }
 
-    function getProposal(uint256 proposalId) public view returns(ProposalStruct memory) {
-            return raisedProposals[proposalId];
+    //all the functions below act as contract interface and can only be called by an EOA
+    //and not internally by other contract functions
+
+    function getProposal(uint256 proposalId)
+        external
+        view
+        returns (ProposalStruct memory)
+    {
+        return raisedProposals[proposalId];
     }
     
-    function getVotesOf(uint256 proposalId) public view returns(VotedStruct[] memory) {
+    function getVotesOf(uint256 proposalId)
+        external
+        view
+        returns (VotedStruct[] memory)
+    {
         return votedOn[proposalId];
     }
 
-    function getStakeholderVotes() external view stakeholderOnly("Unauthorized: not a stakeholder") returns(uint256[] memory) {
+    function getStakeholderVotes()
+       external
+        view
+        stakeholderOnly("Unauthorized: not a stakeholder")
+        returns (uint256[] memory)
+    {
         return stakeholderVotes[msg.sender];
     }
 
-    function getStakeholderBalance() external view stakeholderOnly("Unauthorized: not a stakeholder") returns(uint256){
+    function getStakeholderBalance()
+        external
+        view
+        stakeholderOnly("Unauthorized: not a stakeholder")
+        returns (uint256)
+    {
         return stakeholders[msg.sender];
     }
 
-}
+    function isStakeholder()external view returns (bool) {
+        return stakeholders[msg.sender] > 0;
+    }
 
+    function getContributorBalance()
+        external
+        view
+        contributorOnly("Denied: User is not a contributor")
+        returns (uint256)
+    {
+        return contributors[msg.sender];
+    }
+
+    function isContributor()external view returns (bool) {
+        return contributors[msg.sender] > 0;
+    }
+
+    function getBalance() external view returns (uint256) {
+        return contributors[msg.sender];
+    }
+
+}
