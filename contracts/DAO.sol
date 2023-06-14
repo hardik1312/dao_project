@@ -134,7 +134,37 @@ contract DAO is ReentrancyGuard, AccessControl{
         );
     }
 
-    function 
+    function payTo(
+        address to,
+        uint256 amount
+    ) internal returns(bool){
+        (bool success,) = payable(to).call{value:amount}("");
+        require(success,"Payment failed, something went wrong");
+        return true;
+    }
+
+    function payBeneficiary(uint proposalId) public stakeholderOnly("Unauthorized: Stakeholders Only") nonReentrant returns(uint) {
+        ProposalStruct storage proposal = raisedProposals[proposalId];
+        require(daoBalance>=proposal.amount, "Insufficient funds");
+
+        if(proposal.paid) revert("Payment is already sent.");
+        if(proposal.upvotes <= proposal.downvotes) revert("Insufficient votes.");
+
+        proposal.paid = true;
+        proposal.executor = msg.sender;
+        daoBalance -= proposal.amount;
+
+        payTo(proposal.beneficiary, proposal.amount);
+
+        emit Action(
+            msg.sender,
+            STAKEHOLDER_ROLE,
+            "PAYMENT TRANSFERRED",
+            proposal.beneficiary,
+            proposal.amount
+        );
+        return daoBalance;
+    }
 
 }
 
