@@ -47,15 +47,9 @@ const getEthereumContract = async () => {
     const connectedAccount=getGlobalState('connectedAccount');
 
     if(connectedAccount){
-        const web3=windows.Web3;
-        const networkId=await web3.eth.net.getId();
-        const networkData=await abi.networks[networkId];
-        if(networkData){
-            const contract= new web3.eth.Contract(abi.abi,networkData.address);
+        const web3=window.web3;
+            const contract= new web3.eth.Contract(abi.abi,"0x5FbDB2315678afecb367f032d93F642f64180aa3");
             return contract;
-        }else{
-            return null;
-        }
     }else{
         return getGlobalState('contract');
     }
@@ -64,13 +58,14 @@ const getEthereumContract = async () => {
 const performContribute = async (amount) =>{
     try{
         amount=window.WebGLRenderbuffer.utils.toWei(amount.toString(),'ether');
+        
+        // this step will always refer to the DAO smart contract -> DAO.json abi
         const contract = await getEthereumContract();
         const   account = getGlobalState('connectedAccount');
         await contract.methods.contribute().sender({from:account,value:amount});
         window.location.reload();
     }catch(error){
         reportError(error);
-        return error;
     }
 }
 
@@ -185,7 +180,7 @@ const payoutBeneficiary = async (id) => {
 
 const reportError=(error)=>{
     console.log(JSON.stringify(error),'red');
-    throw new Error('No ethereum object, something is wrong')
+    // throw new Error('No ethereum object, something is wrong')
 }
 
 export{
