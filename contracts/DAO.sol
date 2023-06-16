@@ -9,7 +9,7 @@ contract DAO is ReentrancyGuard,AccessControl{
     bytes32 private immutable STAKEHOLDER_ROLE=keccak256("STAKEHOLDER");
 
     uint256 immutable MIN_STAKEHOLDER_CONTRIBUTION=1 ether;
-    uint32 immutable MIN_VOTE_DURATION= 3 minutes;
+    uint32 immutable MIN_VOTE_DURATION= 10 minutes;
 
     uint32 totalProposals; //int keeps track of total no of prop in the dao
     uint256 public daoBalance; //total balance in the dao
